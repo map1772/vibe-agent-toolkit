@@ -62,12 +62,25 @@ def main():
     live = caps.get("models", {})
     print(f"каталог получен, типов {len(live)}\n")
 
+    # Тиры лежат внутри моделей (grok-itv-10 это тир grok-itv со своей ценой),
+    # поэтому считать их пропавшими нельзя: они есть, просто уровнем ниже.
+    tiers = {}
+    for node in live.values():
+        if isinstance(node, dict):
+            for parent, spec in node.items():
+                for tier in (spec.get("tiers") or []):
+                    tiers[tier] = parent
+    if tiers:
+        print(f"тиров внутри моделей: {len(tiers)} "
+              f"(например {list(tiers)[0]} внутри {list(tiers.values())[0]})\n")
+
     missing, extra_total = [], []
     print(f"{'тип':<8} {'в каталоге':>11} {'нет из доков':>13} {'сверх доков':>12}")
     for t, names in DOCS.items():
-        have = set(live.get(t, {}))
+        node = live.get(t, {})
+        have = set(node) | {k for k, parent in tiers.items() if parent in node}
         miss = [n for n in names if n not in have]
-        extra = sorted(have - set(names))
+        extra = sorted(set(live.get(t, {})) - set(names))
         print(f"{t:<8} {len(have):>11} {len(miss):>13} {len(extra):>12}")
         missing += [(t, n) for n in miss]
         extra_total += [(t, n) for n in extra]
@@ -104,8 +117,12 @@ def main():
     ok = 0
     for m in IMAGE_PROBES:
         spec = _find_model(caps, m)
-        field = v._media_field(m, "image") if spec else None
-        note = str(field) if field else ("модель картинку не принимает" if spec else "нет в каталоге")
+        try:
+            field = v._media_field(m, "image") if spec else None
+            note = str(field) if field else (
+                "модель картинку не принимает" if spec else "нет в каталоге")
+        except ValueError as e:                # несколько полей это разные сценарии
+            field, note = None, str(e).split(":", 1)[-1].strip()[:70]
         print(f"  {m:<22} {note}")
         if spec:
             ok += 1

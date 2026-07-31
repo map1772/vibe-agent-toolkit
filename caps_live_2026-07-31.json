@@ -1,0 +1,1354 @@
+{
+ "status": "ok",
+ "types": [
+  "image",
+  "text",
+  "video",
+  "voice",
+  "music"
+ ],
+ "text_models": {
+  "note": "type=text is synchronous: POST /generate returns the answer in the same response, no polling. Billing is per actual tokens — a reserve is held by max_tokens and the unused part is refunded immediately, in the same call. Free dry run: POST /generate/estimate with type=text returns the reserve and the per-1M rates.",
+  "params": [
+   "prompt (required)",
+   "system",
+   "max_tokens",
+   "effort (low|medium|high|xhigh|max)",
+   "thinking (bool, off by default)"
+  ],
+  "response": [
+   "text",
+   "usage {input, output, cache_read, cache_write}",
+   "cost",
+   "reserved",
+   "refunded",
+   "balance_after"
+  ],
+  "models": {
+   "claude-opus-5": {
+    "label": "Claude Opus 5",
+    "rub_per_1m": {
+     "in": 1500,
+     "out": 7500,
+     "cache_read": 150
+    },
+    "min_charge_rub": 2,
+    "max_output_tokens": 8192,
+    "context_window": 200000,
+    "sample_cost_rub": 3.75,
+    "sample_note": "about 3.75₽ for a 1000-token prompt with a 300-token answer"
+   },
+   "gpt-5.6-sol": {
+    "label": "GPT-5.6 Sol",
+    "rub_per_1m": {
+     "in": 1500,
+     "out": 9000,
+     "cache_read": 150
+    },
+    "min_charge_rub": 2,
+    "max_output_tokens": 8192,
+    "context_window": 400000,
+    "sample_cost_rub": 4.2,
+    "sample_note": "about 4.2₽ for a 1000-token prompt with a 300-token answer"
+   }
+  }
+ },
+ "getting_started": {
+  "base_url": "https://lk.vibemarketolog.ru/api/agent",
+  "auth": "Send header: Authorization: Bearer <your_token>. Get a key at https://lk.vibemarketolog.ru/agent.",
+  "verify_key": "GET /api/agent/me",
+  "flow": [
+   "1. GET /me — confirm the key works and check daily_spend_limit.",
+   "2. GET /balance — check available rubles.",
+   "3. GET /capabilities — discover models and params.",
+   "4. POST /upload-media — upload media and get a stable URL.",
+   "5. POST /generate/estimate — dry-run without spending.",
+   "6. POST /generate with strict=true — start generation.",
+   "7. Poll GET /generation/{id}/status or pass callback_url."
+  ],
+  "image_to_video": {
+   "note": "image_input is for type=image only. Video models need their own source fields.",
+   "veo3_fast|veo3.1|veo3": "image_urls: [\"...\"] + generation_type: \"image-to-video\"",
+   "kling-3.0-std|pro": "image_urls: [\"...\"]",
+   "seedance-2|seedance-2-fast": "first_frame_url: \"...\"",
+   "grok-itv-10|20|30": "image_urls: [\"...\"]",
+   "motion-control-720p|1080p": "character_image_url + reference_video_url"
+  },
+  "golden_rules": [
+   "Always GET /capabilities for live required/optional params.",
+   "Use POST /upload-media for stable URLs.",
+   "Use strict=true and/or /generate/estimate to avoid paying for malformed requests."
+  ],
+  "docs": "https://lk.vibemarketolog.ru/docs/agent-api",
+  "quickstart": "https://lk.vibemarketolog.ru/docs/agent-quickstart"
+ },
+ "models": {
+  "image": {
+   "z-image": {
+    "price": 1.2,
+    "description": "Fast image generation",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio"
+    ],
+    "limits": {
+     "prompt_max": 1000
+    },
+    "hint": "Prompt must not exceed 1000 characters — longer requests are rejected before any charge."
+   },
+   "nano-banana-pro-1k": {
+    "price": 14.4,
+    "description": "Nano Banana Pro 1K",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-pro-2k": {
+    "price": 16.5,
+    "description": "Nano Banana Pro 2K with text",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-pro-4k": {
+    "price": 23,
+    "description": "Nano Banana Pro 4K",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-2-1k": {
+    "price": 15,
+    "description": "Gemini 3.1 Flash Image 1K",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-2-2k": {
+    "price": 18,
+    "description": "Gemini 3.1 Flash Image 2K",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-2-4k": {
+    "price": 25,
+    "description": "Gemini 3.1 Flash Image 4K",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "nano-banana-2-lite": {
+    "price": 9,
+    "description": "Gemini 3.1 Flash Lite Image — fast & cheap, txt2img + img2img by reference",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "1:1",
+      "2:3",
+      "3:2",
+      "3:4",
+      "4:3",
+      "4:5",
+      "5:4",
+      "auto"
+     ]
+    },
+    "limits": {
+     "image_input": 10
+    },
+    "hint": "Aspect ratio: only 1:1/2:3/3:2/3:4/4:3/4:5/5:4/auto (16:9, 9:16, 21:9 are auto-mapped to the nearest). image_input up to 10 for image-to-image.",
+    "preserves_input": false
+   },
+   "gpt-image-1.5": {
+    "price": 20,
+    "description": "GPT image generation/editing",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "gpt-image-2": {
+    "price": 19,
+    "description": "GPT Image 2",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio"
+    ]
+   },
+   "gpt-image-2-edit": {
+    "price": 22,
+    "description": "GPT Image 2 edit",
+    "required": [
+     "prompt",
+     "image_input"
+    ],
+    "optional": [
+     "aspect_ratio"
+    ],
+    "preserves_input": false
+   },
+   "seedream-4.5": {
+    "price": 15,
+    "description": "SeeDream 4.5",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_input"
+    ],
+    "preserves_input": false
+   },
+   "seedream-5-lite": {
+    "price": 15,
+    "description": "SeeDream 5 Lite",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio"
+    ]
+   },
+   "seedream-5-pro": {
+    "price": 40,
+    "price_by_quality": {
+     "basic": 25,
+     "high": 40
+    },
+    "price_note": "price = цена при quality по умолчанию; все варианты — в price_by_quality",
+    "description": "SeeDream 5 Pro (ByteDance) — фотореализм до 2K, точный текст на изображении, мультиязычность",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "quality",
+     "output_format"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "1:1",
+      "4:3",
+      "3:4",
+      "16:9",
+      "9:16",
+      "2:3",
+      "3:2",
+      "21:9"
+     ],
+     "quality": [
+      "basic",
+      "high"
+     ],
+     "output_format": [
+      "png",
+      "jpeg"
+     ]
+    },
+    "hint": "quality: basic=1K, high=2K. output_format: png|jpeg. Для редактирования по фото используйте seedream-5-pro-edit."
+   },
+   "seedream-5-pro-edit": {
+    "price": 45,
+    "price_by_quality": {
+     "basic": 28,
+     "high": 45
+    },
+    "price_note": "price = цена при quality по умолчанию; все варианты — в price_by_quality",
+    "description": "SeeDream 5 Pro image-to-image — редактирование по 1–10 референсам",
+    "required": [
+     "prompt",
+     "image_input"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "quality",
+     "output_format"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "1:1",
+      "4:3",
+      "3:4",
+      "16:9",
+      "9:16",
+      "2:3",
+      "3:2",
+      "21:9"
+     ],
+     "quality": [
+      "basic",
+      "high"
+     ],
+     "output_format": [
+      "png",
+      "jpeg"
+     ]
+    },
+    "limits": {
+     "image_input": 10
+    },
+    "hint": "image_input: 1–10 стабильных URL референсов (POST /api/agent/upload-media). quality: basic=1K, high=2K.",
+    "preserves_input": false
+   },
+   "grok-image": {
+    "price": 18,
+    "description": "Grok text-to-image",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio"
+    ]
+   },
+   "gemini-omni-character": {
+    "price": 49,
+    "description": "Gemini Omni — консистентный персонаж из 1 фото + описания. Возвращает изображение персонажа; characterId из result_object переиспользуется в gemini-omni-video → character_ids.",
+    "required": [
+     "prompt",
+     "image_urls"
+    ],
+    "optional": [
+     "descriptions",
+     "character_name",
+     "audio_ids"
+    ],
+    "limits": {
+     "image_urls": 1,
+     "prompt_max": 20000
+    },
+    "hint": "prompt = описание персонажа или поле descriptions. image_urls: ровно 1 стабильный URL, используйте POST /api/agent/upload-media. characterId берите из GET /generation/{id}/status.",
+    "preserves_input": false
+   }
+  },
+  "video": {
+   "gemini-omni-video": {
+    "price": 149,
+    "description": "Google Gemini Omni (движок Veo 3) — text/image/video-to-video с нативным синхронным звуком. Кастомный голос передаётся только через персонажа.",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "image_urls",
+     "video_list",
+     "character_ids",
+     "duration",
+     "aspect_ratio",
+     "resolution",
+     "seed",
+     "lang"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "16:9",
+      "9:16"
+     ],
+     "resolution": [
+      "720p",
+      "1080p",
+      "4k"
+     ],
+     "duration": [
+      4,
+      6,
+      8,
+      10
+     ]
+    },
+    "limits": {
+     "image_urls": 7,
+     "video_list": 1,
+     "character_ids": 3,
+     "prompt_max": 20000
+    },
+    "hint": "duration = 4|6|8|10. image_urls до 7 → image-to-video. video_list: [{url,start,ends}] → video-to-video, 1 клип, отрезок ≤10с. Не передавайте audio_ids напрямую в video: создайте gemini-omni-character с audio_ids и передайте character_ids."
+   },
+   "grok-ttv": {
+    "price": 36,
+    "tier_prices": {
+     "grok-ttv-10": 196,
+     "grok-ttv-20": 316
+    },
+    "price_note": "price = цена при дефолтных параметрах; итог зависит от duration/тира — сверяйтесь с tier_prices или POST /generate/estimate",
+    "description": "Grok Imagine 1.5 Text-to-Video (1-15s)",
+    "tiers": [
+     "grok-ttv-10",
+     "grok-ttv-20"
+    ],
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "duration",
+     "aspect_ratio",
+     "resolution"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "1:1",
+      "16:9",
+      "9:16",
+      "3:2",
+      "2:3",
+      "auto"
+     ],
+     "resolution": [
+      "480p",
+      "720p"
+     ]
+    },
+    "limits": {
+     "duration": "1-15s",
+     "prompt_max": 4096
+    }
+   },
+   "grok-itv": {
+    "price": 36,
+    "tier_prices": {
+     "grok-itv-10": 196,
+     "grok-itv-20": 316
+    },
+    "price_note": "price = цена при дефолтных параметрах; итог зависит от duration/тира — сверяйтесь с tier_prices или POST /generate/estimate",
+    "description": "Grok Imagine 1.5 Image-to-Video (1-15s)",
+    "tiers": [
+     "grok-itv-10",
+     "grok-itv-20"
+    ],
+    "required": [
+     "prompt",
+     "image_urls"
+    ],
+    "optional": [
+     "duration",
+     "aspect_ratio",
+     "resolution"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "1:1",
+      "16:9",
+      "9:16",
+      "3:2",
+      "2:3",
+      "auto"
+     ],
+     "resolution": [
+      "480p",
+      "720p"
+     ]
+    },
+    "limits": {
+     "image_urls": 1,
+     "duration": "1-15s",
+     "prompt_max": 4096
+    },
+    "hint": "image_urls: exactly 1 stable URL. Use POST /api/agent/upload-media."
+   },
+   "grok-extend": {
+    "price": 144,
+    "description": "Extend an existing Grok video",
+    "required": [
+     "prompt",
+     "ref_task_id"
+    ],
+    "optional": [
+     "extend_at",
+     "extend_times",
+     "ref_index"
+    ]
+   },
+   "grok-upscale": {
+    "price": 72,
+    "description": "Upscale an existing Grok video",
+    "required": [
+     "ref_task_id"
+    ]
+   },
+   "veo3_fast": {
+    "price": 120,
+    "description": "Veo 3.1 Fast",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "image_urls",
+     "generation_type",
+     "generate_audio",
+     "negative_prompt",
+     "seed"
+    ],
+    "enums": {
+     "resolution": [
+      "720p",
+      "1080p"
+     ],
+     "generation_type": [
+      "text-to-video",
+      "image-to-video"
+     ]
+    }
+   },
+   "veo3.1": {
+    "price": 120,
+    "description": "Veo 3.1 quality",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "image_urls",
+     "generation_type",
+     "generate_audio"
+    ]
+   },
+   "veo3": {
+    "price": 570,
+    "description": "Veo 3 legacy quality",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "image_urls"
+    ]
+   },
+   "kling-3.0-std": {
+    "price": 250,
+    "description": "Kling 3.0 Standard",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_urls",
+     "duration",
+     "sound"
+    ]
+   },
+   "kling-3.0-pro": {
+    "price": 549,
+    "description": "Kling 3.0 Pro",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "image_urls",
+     "duration",
+     "sound"
+    ]
+   },
+   "seedance-2-fast": {
+    "price": 708,
+    "description": "ByteDance Seedance 2.0 Fast",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "generate_audio",
+     "web_search",
+     "reference_image_urls",
+     "reference_video_urls",
+     "reference_audio_urls",
+     "first_frame_url",
+     "last_frame_url",
+     "return_last_frame"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16",
+      "21:9"
+     ],
+     "resolution": [
+      "480p",
+      "720p"
+     ]
+    },
+    "limits": {
+     "duration": "4-15s",
+     "reference_image_urls": 9,
+     "reference_video_urls": 3,
+     "reference_audio_urls": 3,
+     "prompt_max": 20000,
+     "mutually_exclusive": [
+      [
+       "first_frame_url",
+       "last_frame_url"
+      ],
+      [
+       "reference_image_urls"
+      ]
+     ]
+    },
+    "hint": "Starting frame and reference images are different scenarios — send only one of them. web_search works only without any source material and is dropped otherwise."
+   },
+   "seedance-2": {
+    "price": 1188,
+    "description": "ByteDance Seedance 2.0 Quality",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "generate_audio",
+     "web_search",
+     "reference_image_urls",
+     "reference_video_urls",
+     "reference_audio_urls",
+     "first_frame_url",
+     "last_frame_url",
+     "return_last_frame"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16",
+      "21:9"
+     ],
+     "resolution": [
+      "480p",
+      "720p",
+      "1080p"
+     ]
+    },
+    "limits": {
+     "duration": "4-15s",
+     "reference_image_urls": 9,
+     "reference_video_urls": 3,
+     "reference_audio_urls": 3,
+     "prompt_max": 20000,
+     "mutually_exclusive": [
+      [
+       "first_frame_url",
+       "last_frame_url"
+      ],
+      [
+       "reference_image_urls"
+      ]
+     ]
+    },
+    "hint": "Starting frame and reference images are different scenarios — send only one of them. web_search works only without any source material and is dropped otherwise."
+   },
+   "seedance-2-mini": {
+    "price": 56,
+    "description": "ByteDance Seedance 2 Mini — budget per-second tier, full features (references, audio, web search)",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "aspect_ratio",
+     "duration",
+     "resolution",
+     "generate_audio",
+     "web_search",
+     "reference_image_urls",
+     "reference_video_urls",
+     "reference_audio_urls",
+     "first_frame_url",
+     "last_frame_url"
+    ],
+    "enums": {
+     "aspect_ratio": [
+      "16:9",
+      "4:3",
+      "1:1",
+      "3:4",
+      "9:16",
+      "21:9"
+     ],
+     "resolution": [
+      "480p",
+      "720p"
+     ]
+    },
+    "limits": {
+     "duration": "4-15s",
+     "reference_image_urls": 9,
+     "reference_video_urls": 3,
+     "reference_audio_urls": 3,
+     "prompt_max": 20000,
+     "mutually_exclusive": [
+      [
+       "first_frame_url",
+       "last_frame_url"
+      ],
+      [
+       "reference_image_urls"
+      ]
+     ]
+    },
+    "hint": "Per-second pricing (cheapest Seedance tier). resolution: 480p or 720p only. Use POST /api/agent/upload-media for reference files. Starting frame and reference images are different scenarios — send only one of them. web_search works only without any source material and is dropped otherwise."
+   },
+   "motion-control-720p": {
+    "price": null,
+    "price_formula": "ceil(min(max(video_duration,3),30)) * 15 ₽",
+    "per_second": 15,
+    "description": "Kling 3.0 Motion Control 720p. Transfer motion and facial expressions from a reference video onto a character image.",
+    "required": [
+     "character_image_url",
+     "reference_video_url"
+    ],
+    "optional": [
+     "prompt",
+     "character_orientation",
+     "video_duration"
+    ],
+    "enums": {
+     "character_orientation": [
+      "image",
+      "video"
+     ]
+    },
+    "limits": {
+     "prompt_max": 2500,
+     "video_duration_max": 30,
+     "video_duration_image": 10
+    }
+   },
+   "motion-control-1080p": {
+    "price": null,
+    "price_formula": "ceil(min(max(video_duration,3),30)) * 22 ₽",
+    "per_second": 22,
+    "description": "Kling 3.0 Motion Control 1080p HD.",
+    "required": [
+     "character_image_url",
+     "reference_video_url"
+    ],
+    "optional": [
+     "prompt",
+     "character_orientation",
+     "video_duration"
+    ],
+    "enums": {
+     "character_orientation": [
+      "image",
+      "video"
+     ]
+    },
+    "limits": {
+     "prompt_max": 2500,
+     "video_duration_max": 30,
+     "video_duration_image": 10
+    }
+   },
+   "veed-avatar": {
+    "price": 79,
+    "description": "VEED talking-head avatar",
+    "required": [
+     "avatar_id",
+     "script"
+    ],
+    "optional": [
+     "language"
+    ]
+   },
+   "topview-url-video": {
+    "price": 149,
+    "description": "TopView URL-to-Video preview/render workflow",
+    "required": [
+     "source_url"
+    ],
+    "optional": [
+     "video_length",
+     "language",
+     "avatar_id"
+    ],
+    "note": "Preview phase is free; HD render is billed when accepted."
+   }
+  },
+  "voice": {
+   "gemini-flash-tts": {
+    "price": 13,
+    "description": "Google Gemini 3.1 Flash TTS — fast, expressive text-to-speech and multi-speaker dialogue. Price per-character: 13₽ per started 1000 chars.",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "voice_name",
+     "style",
+     "temperature",
+     "scene",
+     "sample_context",
+     "speakers",
+     "dialogue_turns"
+    ],
+    "limits": {
+     "prompt_max": 5000,
+     "speakers_max": 2,
+     "temperature": "0.0-2.0",
+     "scene_max": 1000,
+     "sample_context_max": 1000
+    },
+    "enums": {
+     "style": [
+      "Deadpan",
+      "Whisper",
+      "Newscaster"
+     ]
+    },
+    "voices": [
+     "Zephyr",
+     "Puck",
+     "Charon",
+     "Kore",
+     "Fenrir",
+     "Leda",
+     "Orus",
+     "Aoede",
+     "Callirrhoe",
+     "Autonoe",
+     "Enceladus",
+     "Iapetus",
+     "Umbriel",
+     "Algieba",
+     "Despina",
+     "Erinome",
+     "Algenib",
+     "Rasalgethi",
+     "Laomedeia",
+     "Achernar",
+     "Alnilam",
+     "Schedar",
+     "Gacrux",
+     "Pulcherrima",
+     "Achird",
+     "Zubenelgenubi",
+     "Vindemiatrix",
+     "Sadachbia",
+     "Sadaltager",
+     "Sulafat"
+    ],
+    "note": "Single voice: pass prompt + optional voice_name (one of voices, default Zephyr) + style. Control emotion with inline tags in the text, e.g. \"[cheerfully] Hello! [whispering] a secret\". Dialogue: pass speakers[] and dialogue_turns[] (see dialogue_format). temperature 0-2 = liveliness. scene/sample_context set atmosphere and tone.",
+    "dialogue_format": {
+     "speakers": [
+      {
+       "speaker_id": "Speaker 1",
+       "voice_name": "Puck",
+       "style": "Deadpan"
+      },
+      {
+       "speaker_id": "Speaker 2",
+       "voice_name": "Kore",
+       "style": "Deadpan"
+      }
+     ],
+     "dialogue_turns": [
+      {
+       "speaker_id": "Speaker 1",
+       "text": "[cheerfully] Hi! How are you?"
+      },
+      {
+       "speaker_id": "Speaker 2",
+       "text": "[calmly] Great, thanks."
+      }
+     ]
+    }
+   },
+   "gemini-pro-tts": {
+    "price": 18,
+    "description": "Google Gemini 2.5 Pro TTS — studio-quality, high-fidelity text-to-speech and dialogue. Price per-character: 18₽ per started 1000 chars.",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "voice_name",
+     "style",
+     "temperature",
+     "scene",
+     "sample_context",
+     "speakers",
+     "dialogue_turns"
+    ],
+    "limits": {
+     "prompt_max": 5000,
+     "speakers_max": 2,
+     "temperature": "0.0-2.0",
+     "scene_max": 1000,
+     "sample_context_max": 1000
+    },
+    "enums": {
+     "style": [
+      "Deadpan",
+      "Whisper",
+      "Newscaster"
+     ]
+    },
+    "voices": [
+     "Zephyr",
+     "Puck",
+     "Charon",
+     "Kore",
+     "Fenrir",
+     "Leda",
+     "Orus",
+     "Aoede",
+     "Callirrhoe",
+     "Autonoe",
+     "Enceladus",
+     "Iapetus",
+     "Umbriel",
+     "Algieba",
+     "Despina",
+     "Erinome",
+     "Algenib",
+     "Rasalgethi",
+     "Laomedeia",
+     "Achernar",
+     "Alnilam",
+     "Schedar",
+     "Gacrux",
+     "Pulcherrima",
+     "Achird",
+     "Zubenelgenubi",
+     "Vindemiatrix",
+     "Sadachbia",
+     "Sadaltager",
+     "Sulafat"
+    ],
+    "note": "Same params as gemini-flash-tts, premium studio quality. Single voice: prompt + voice_name + style + inline emotion tags. Dialogue: speakers[] + dialogue_turns[].",
+    "dialogue_format": {
+     "speakers": [
+      {
+       "speaker_id": "Speaker 1",
+       "voice_name": "Charon",
+       "style": "Newscaster"
+      },
+      {
+       "speaker_id": "Speaker 2",
+       "voice_name": "Aoede",
+       "style": "Deadpan"
+      }
+     ],
+     "dialogue_turns": [
+      {
+       "speaker_id": "Speaker 1",
+       "text": "In technology news today..."
+      },
+      {
+       "speaker_id": "Speaker 2",
+       "text": "[warmly] And it is a big one."
+      }
+     ]
+    }
+   },
+   "el-tts-turbo": {
+    "price": 29,
+    "description": "ElevenLabs TTS Turbo 2.5 — fast text-to-speech. Price is per-character: 6₽ per started 1000 chars.",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "voice_id",
+     "language_code",
+     "stability",
+     "similarity_boost",
+     "style",
+     "speed"
+    ],
+    "limits": {
+     "prompt_max": 5000,
+     "long_voiceover_prompt_max": 200000,
+     "stability": "0.0-1.0",
+     "similarity_boost": "0.0-1.0",
+     "style": "0.0-1.0",
+     "speed": "0.7-1.2"
+    },
+    "voices_url": "/api/agent/voices",
+    "note": "voice_id accepts either a name or an ElevenLabs voice ID. See GET /api/agent/voices. Long texts: prompt over 5000 chars (up to 200000) is automatically processed as a long voiceover — split into ~4800-char chunks, voiced and merged into one mp3; /generate then returns voiceover_id + status_url (GET /api/agent/voiceover/long/{id}) instead of generation_id. Same per-character price, refunded on failure."
+   },
+   "el-tts-multilingual-v2": {
+    "price": 39,
+    "description": "ElevenLabs TTS Multilingual V2 — high-quality multi-language speech",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "voice_id",
+     "language_code",
+     "stability",
+     "similarity_boost",
+     "style",
+     "speed",
+     "previous_text",
+     "next_text"
+    ],
+    "limits": {
+     "prompt_max": 5000,
+     "previous_text_max": 5000,
+     "next_text_max": 5000,
+     "stability": "0.0-1.0",
+     "similarity_boost": "0.0-1.0",
+     "style": "0.0-1.0",
+     "speed": "0.7-1.2"
+    },
+    "voices_url": "/api/agent/voices",
+    "note": "Higher quality than turbo; supports previous_text/next_text for speech continuity."
+   },
+   "el-dialogue-v3": {
+    "price": 49,
+    "description": "ElevenLabs Dialogue v3 multi-speaker conversational audio",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "dialogue",
+     "voice_id",
+     "language_code",
+     "stability"
+    ],
+    "limits": {
+     "prompt_max": 5000,
+     "dialogue_speakers_max": 20,
+     "stability": "0.0-1.0"
+    },
+    "voices_url": "/api/agent/voices",
+    "note": "For multi-speaker dialogue pass dialogue[] with voice_id per line. If omitted, a single-speaker dialogue is built from prompt.",
+    "dialogue_format": [
+     {
+      "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+      "text": "Hello!"
+     },
+     {
+      "voice_id": "Xb7hH8MSUJpSbSDYk0k2",
+      "text": "Hi, good to hear you."
+     }
+    ]
+   },
+   "el-sound-fx-v2": {
+    "price": 19,
+    "description": "ElevenLabs Sound FX v2 — generate sound effects from text description",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "duration_seconds",
+     "prompt_influence"
+    ],
+    "limits": {
+     "prompt_max": 1000,
+     "duration_seconds": "0.5-22.0",
+     "prompt_influence": "0.0-1.0"
+    },
+    "note": "Describe the sound effect. duration_seconds defaults to 5s, prompt_influence defaults to 0.5."
+   },
+   "gemini-omni-audio": {
+    "price": 39,
+    "description": "Gemini Omni — кастомный голос-ассет. Возвращает audioId в result_object; аудиофайл не возвращается.",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "audio_id",
+     "voice_description",
+     "example_dialogue",
+     "voice_name"
+    ],
+    "enums": {
+     "audio_id": [
+      "achernar",
+      "achird",
+      "algenib",
+      "algieba",
+      "alnilam",
+      "aoede",
+      "autonoe",
+      "callirrhoe",
+      "charon",
+      "despina",
+      "enceladus",
+      "erinome",
+      "fenrir",
+      "gacrux",
+      "iapetus",
+      "kore",
+      "laomedeia",
+      "leda",
+      "orus",
+      "puck",
+      "pulcherrima",
+      "rasalgethi",
+      "sadachbia",
+      "sadaltager",
+      "schedar",
+      "sulafat",
+      "umbriel",
+      "vindemiatrix",
+      "zephyr",
+      "zubenelgenubi"
+     ]
+    },
+    "limits": {
+     "prompt_max": 210,
+     "voice_description_max": 20000,
+     "example_dialogue_max": 120
+    },
+    "hint": "prompt = название голоса. audio_id — базовый пресет, по умолчанию achernar. audioId используйте в gemini-omni-character через audio_ids, а затем персонажа в video через character_ids."
+   }
+  },
+  "music": {
+   "suno-v5": {
+    "price": 89,
+    "description": "Suno V5 with vocals",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "lyrics",
+     "music_style",
+     "style_tags",
+     "vocal_gender",
+     "persona_id"
+    ],
+    "note": "persona_id can be a custom voice created with POST /api/agent/voice/validate."
+   },
+   "suno-v5-instrumental": {
+    "price": 89,
+    "description": "Suno V5 instrumental",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "music_style",
+     "style_tags"
+    ]
+   },
+   "suno-v5.5": {
+    "price": 99,
+    "description": "Suno V5.5 next-gen AI music with vocals",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "lyrics",
+     "music_style",
+     "style_tags",
+     "vocal_gender",
+     "persona_id"
+    ],
+    "note": "Latest Suno model with improved vocal quality and style adherence. persona_id can be a custom voice."
+   },
+   "suno-v5.5-instrumental": {
+    "price": 99,
+    "description": "Suno V5.5 next-gen instrumental music",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "music_style",
+     "style_tags"
+    ]
+   }
+  },
+  "text": {
+   "claude-opus-5": {
+    "price": null,
+    "description": "Claude Opus 5 — synchronous text generation, billed per actual tokens",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "system",
+     "max_tokens",
+     "effort",
+     "thinking"
+    ],
+    "enums": {
+     "effort": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    "limits": {
+     "max_tokens": 8192,
+     "context_window": 200000
+    },
+    "hint": "Answer comes back in the same response (no polling). Price is charged per actual tokens: 1500₽ per 1M input, 7500₽ per 1M output, minimum 2₽ per call. A reserve is held by max_tokens and the unused part is refunded immediately. thinking=true turns on reasoning (better on hard tasks, costs output tokens); it is off by default.",
+    "preserves_input": false
+   },
+   "gpt-5.6-sol": {
+    "price": null,
+    "description": "GPT-5.6 Sol — synchronous text generation, billed per actual tokens",
+    "required": [
+     "prompt"
+    ],
+    "optional": [
+     "system",
+     "max_tokens",
+     "effort",
+     "thinking"
+    ],
+    "enums": {
+     "effort": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    "limits": {
+     "max_tokens": 8192,
+     "context_window": 400000
+    },
+    "hint": "Answer comes back in the same response (no polling). Price is charged per actual tokens: 1500₽ per 1M input, 9000₽ per 1M output, minimum 2₽ per call. A reserve is held by max_tokens and the unused part is refunded immediately. thinking=true turns on reasoning (better on hard tasks, costs output tokens); it is off by default.",
+    "preserves_input": false
+   }
+  }
+ },
+ "features": {
+  "pre_charge_validation": "Media URL params are HEAD-checked before any debit. Bad URL returns HTTP 422 media_validation_failed, no charge.",
+  "webhook_delivery": "Pass callback_url in /generate. We POST generation.complete or generation.error with X-Vibe-Signature HMAC. Test with POST /api/agent/webhook-test.",
+  "strict_mode": "Pass strict=true to reject unknown/incompatible params before debit. Without strict they are reported as ignored_params.",
+  "dry_run": "POST /generate/estimate validates and prices a request without spending money.",
+  "auto_refund_on_error": "If provider or pipeline fails after start, the generation cost is refunded automatically.",
+  "persistence": "Generation continues server-side even if polling stops."
+ },
+ "brand": {
+  "note": "Brand Voice: store brand profiles (tone, palette, voice, defaults) and pass brand_id to /generate — brand fields are injected only where the model schema allows, user params always win, price-affecting params are never injected. Set an active brand via POST /brand/activate to apply it to every generation without passing brand_id. Opt out per-request with brand_apply=false.",
+  "endpoints": {
+   "GET /api/agent/brands": "List brand profiles with products and active pair (scope: read).",
+   "GET /api/agent/brand/{id}": "One brand profile (scope: read).",
+   "POST /api/agent/brand": "Create or update (pass id) a brand profile — free (scope: write).",
+   "DELETE /api/agent/brand/{id}": "Delete a brand profile (scope: write).",
+   "POST /api/agent/brand/{id}/product": "Create or update (pass id) a product/service (scope: write).",
+   "DELETE /api/agent/product/{id}": "Delete a product (scope: write).",
+   "POST /api/agent/brand/activate": "{brand_id, product_id} — set active pair; nulls switch it off (scope: write)."
+  },
+  "generate_params": {
+   "brand_id": "Apply this brand profile to the generation (must be yours, otherwise 422 brand_not_found before any debit).",
+   "product_id": "Optional product of the same brand for context.",
+   "brand_apply": "false disables injection even when an active brand is set."
+  },
+  "estimate": "POST /generate/estimate with brand_id returns applied_brand_fields[] — exactly what will be injected, free of charge.",
+  "limits": {
+   "brands_per_user": 10,
+   "products_per_user": 50
+  }
+ },
+ "upload_endpoint": {
+  "url": "POST /api/agent/upload-media",
+  "fields": [
+   "file (multipart)"
+  ],
+  "limits": {
+   "image": "30 MB (jpeg/png/webp/gif)",
+   "video": "50 MB (mp4/mov)",
+   "audio": "15 MB (mp3/wav)"
+  },
+  "returns": "JSON with stable URL for image_urls, reference_*_urls, first_frame_url, etc.",
+  "ttl_days": 7
+ },
+ "music_params": {
+  "type": "music",
+  "model": "suno-v5, suno-v5-instrumental, suno-v5.5, or suno-v5.5-instrumental",
+  "prompt": "Description of the song",
+  "lyrics": "(optional) Song lyrics text",
+  "music_style": "(optional) e.g. pop, rock, jazz, electronic",
+  "style_tags": "(optional) e.g. upbeat, energetic, calm",
+  "vocal_gender": "(optional) m or f (default: f)",
+  "persona_id": "(optional) Custom voice ID from POST /api/agent/voice/validate workflow"
+ },
+ "suno_voice_workflow": {
+  "description": "Create a custom voice clone for use in Suno music generation. Voices have limited validity period; check status/list before use.",
+  "cost": "50₽ charged at POST /api/agent/voice/validate",
+  "steps": [
+   "1. POST /api/agent/voice/validate — submit source audio URL + vocal segment. Returns task_id.",
+   "2. GET /api/agent/voice/validate-info?task_id=... — poll until verification phrase is ready.",
+   "3. Record the user reading the phrase and upload it via POST /api/agent/upload-media.",
+   "4. POST /api/agent/voice/generate — submit task_id + verify_url. Returns new task_id.",
+   "5. GET /api/agent/voice/status?task_id=... — poll until voice_id is ready.",
+   "6. Use voice_id as persona_id in POST /api/agent/generate with type=music and model=suno-v5 or suno-v5.5."
+  ],
+  "regenerate": "If the validation phrase expired: POST /api/agent/voice/regenerate.",
+  "list_voices": "GET /api/agent/voice/list — list your custom voices."
+ },
+ "voices_catalog": {
+  "url": "GET /api/agent/voices",
+  "description": "ElevenLabs voice catalog. Filter by ?gender=female&category=professional&search=calm."
+ },
+ "endpoints": {
+  "POST /api/agent/generate": "Start generation. Pass strict=true to reject bad params before debit.",
+  "POST /api/agent/generate/estimate": "Dry-run: validate + price a /generate body without spending",
+  "POST /api/agent/webhook-test": "Send a signed test event to callback_url",
+  "POST /api/agent/upload-media": "Upload a file, get a stable URL",
+  "GET /api/agent/generation/{id}/status": "Check generation status",
+  "GET /api/agent/voiceover/long/{id}": "Long voiceover (el-tts-turbo, prompt > 5000 chars) progress and result",
+  "GET /api/agent/balance": "Check balance",
+  "GET /api/agent/prices": "Full price list",
+  "GET /api/agent/voices": "ElevenLabs voice catalog",
+  "POST /api/agent/voice/validate": "Suno Voice: submit source audio for custom voice creation",
+  "GET /api/agent/voice/validate-info": "Suno Voice: get verification phrase",
+  "POST /api/agent/voice/generate": "Suno Voice: submit recorded verification audio",
+  "GET /api/agent/voice/status": "Suno Voice: check voice creation status",
+  "POST /api/agent/voice/regenerate": "Suno Voice: regenerate expired verification phrase",
+  "GET /api/agent/voice/list": "Suno Voice: list custom voices",
+  "POST /api/agent/safety-check": "Pre-action risk assessment"
+ },
+ "partner_only": "Программное управление рекламой (кампании Яндекс Директа, автопилот, доступы к рекламным кабинетам, исследование спроса) в открытую часть не входит и предоставляется по партнёрскому соглашению: https://vibemarketolog.ru/api"
+}

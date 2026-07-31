@@ -29,7 +29,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vibe_fake                                   # noqa: E402
 from vibe import Vibe, VibeError                   # noqa: E402
 
-CAPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_caps_live.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+# Снимок каталога лежит рядом, поэтому замеры воспроизводятся из чистой копии
+# репозитория без сети. Свежий снимок делает check_live.py.
+CAPS = next((p for p in (os.path.join(HERE, "_caps_live.json"),
+                         os.path.join(HERE, "caps_live_2026-07-31.json"))
+             if os.path.exists(p)), os.path.join(HERE, "caps_live_2026-07-31.json"))
 
 # Сценарий партии: 25 запросов, из них 6 с ошибками, которые документация сама
 # называет частыми. Это 24 процента, доля выбрана мной, не измерена на людях.

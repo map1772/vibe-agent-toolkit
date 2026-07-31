@@ -163,13 +163,13 @@ class Vibe:
         return self._caps
 
     def model_spec(self, model):
-        """Описание модели из живого каталога. None, если каталог недоступен
-        или модели в нём нет: тогда работаем по таблице из документации."""
+        """Описание модели из живого каталога. Если имя это тир, отдаём спеку
+        родителя: параметры у тира те же, отличается только цена."""
         try:
             caps = self.capabilities
         except VibeError:
             return None
-        return _find_model(caps, model)
+        return _find_model(caps, model) or _find_tier_parent(caps, model)
 
     def balance(self):
         return self._call("GET", "/balance")
@@ -181,8 +181,12 @@ class Vibe:
     # ---------- сборка запроса ----------
 
     def known_models(self, type=None):
-        """Имена моделей из живого каталога. Пустое множество, если каталог
-        недоступен: тогда проверять нечем и клиент не мешает работать."""
+        """Имена моделей из живого каталога, ВКЛЮЧАЯ тиры.
+
+        У части моделей каталог отдаёт поле tiers со своими ценами в
+        tier_prices: grok-itv стоит 36, а его тир grok-itv-10 уже 196.
+        Если считать тир опечаткой и советовать базовую модель, получится
+        тихая подмена тарифа втрое дешевле запрошенного."""
         try:
             caps = self.capabilities
         except VibeError:
@@ -190,14 +194,24 @@ class Vibe:
         models = caps.get("models") if isinstance(caps, dict) else None
         if not isinstance(models, dict):
             return set()
-        if type:
-            node = models.get(type)
-            return set(node) if isinstance(node, dict) else set()
+        nodes = [models.get(type)] if type else list(models.values())
         out = set()
-        for node in models.values():
-            if isinstance(node, dict):
-                out |= set(node)
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            out |= set(node)
+            for spec in node.values():
+                if isinstance(spec, dict):
+                    out |= set(spec.get("tiers") or [])
         return out
+
+    def tier_price(self, model):
+        """Цена конкретного тира, если это тир. Иначе цена самой модели."""
+        spec = self.model_spec(model)
+        if not isinstance(spec, dict):
+            return None
+        prices = spec.get("tier_prices") or {}
+        return prices.get(model, spec.get("price"))
 
     def _body(self, type, model, prompt, fields):
         fields = dict(fields)
@@ -217,11 +231,12 @@ class Vibe:
         body = {"type": type, "model": model, "prompt": prompt, "strict": True}
 
         # человеческие имена -> поле конкретной модели
+        prefer = fields.pop("field", None)     # явный выбор, когда полей несколько
         for kind in ("image", "video", "audio"):
             value = fields.pop(kind, None)
             if value is None:
                 continue
-            target = self._media_field(model, kind)
+            target = self._media_field(model, kind, prefer if kind == "image" else None)
             if not target:
                 raise ValueError(
                     f"модель {model} не принимает {kind}: в её схеме нет подходящего поля. "
@@ -233,13 +248,27 @@ class Vibe:
         body["strict"] = True     # после merge: иначе strict=False из kwargs тихо снимет защиту
         return {k: v for k, v in body.items() if v is not None}
 
-    def _media_field(self, model, kind):
-        """Ищем приёмник медиа сначала в живой схеме модели, потом в таблице."""
+    def _media_field(self, model, kind, prefer=None):
+        """Ищем приёмник медиа сначала в живой схеме модели, потом в таблице.
+
+        Если модель принимает и первый кадр, и референсные картинки, это два
+        РАЗНЫХ сценария, а не синонимы: первый кадр задаёт начало ролика,
+        референсы задают стиль. Молча выбирать за пользователя нельзя."""
         spec = self.model_spec(model)
         if spec is None:                       # каталог недоступен или модель новая
             return _fallback_field(model, kind)
         known = _param_names(spec)
-        return next((n for n in MEDIA_FIELDS[kind] if n in known), None)
+        if prefer:
+            if prefer not in known:
+                raise ValueError(f"модель {model} не принимает поле {prefer}")
+            return prefer
+        hits = [n for n in MEDIA_FIELDS[kind] if n in known]
+        if kind == "image" and len(hits) > 1:
+            raise ValueError(
+                f"модель {model} принимает картинку в разные поля: {', '.join(hits)}. "
+                f"Это разные сценарии, выберите явно через field=, например "
+                f"field='{hits[0]}'")
+        return hits[0] if hits else None
 
     # ---------- генерация ----------
 
@@ -267,7 +296,20 @@ class Vibe:
                                f"повторите вызов с confirm=True",
                     "estimate": est})
 
-        return self._call("POST", "/generate", body, idem=str(uuid.uuid4()))
+        out = self._call("POST", "/generate", body, idem=str(uuid.uuid4()))
+
+        # Сервер сообщает отброшенные поля, но по умолчанию об этом молчит в
+        # логах вызывающего. Раз деньги уже списаны, случай «строгий режим не
+        # сработал» обязан быть видимым, а не тихим.
+        ignored = out.get("ignored_params") if isinstance(out, dict) else None
+        if ignored:
+            raise VibeError(0, {
+                "error": "params_ignored_after_charge",
+                "message": f"сервер принял запрос, списал {out.get('cost')} р и "
+                           f"проигнорировал поля: {', '.join(map(str, ignored))}. "
+                           f"Результат почти наверняка не тот, что вы просили",
+                "generation": out})
+        return out
 
     def status(self, generation_id):
         return self._call("GET", f"/generation/{generation_id}/status")
@@ -326,6 +368,20 @@ class Vibe:
 
 
 # ---------- разбор каталога ----------
+
+def _find_tier_parent(caps, model):
+    """Спека родителя, если имя это тир (grok-itv-10 внутри grok-itv)."""
+    models = caps.get("models") if isinstance(caps, dict) else None
+    if not isinstance(models, dict):
+        return None
+    for node in models.values():
+        if not isinstance(node, dict):
+            continue
+        for spec in node.values():
+            if isinstance(spec, dict) and model in (spec.get("tiers") or []):
+                return spec
+    return None
+
 
 def _find_model(caps, model):
     """Каталог самоописывающийся, но его форма не зафиксирована в документации.
@@ -577,7 +633,44 @@ def _selftest():
     except VibeError as e:
         assert e.code == "estimate_unavailable", e.code
 
-    print("самопроверка пройдена: 16 из 16")
+    # 17. Тир это не опечатка. Каталог кладёт тиры внутрь модели, у них своя
+    #     цена, и советовать вместо тира базовую модель значит подменить тариф.
+    caps_t = {"models": {"video": {"grok-itv": {
+        "price": 36, "tiers": ["grok-itv-10", "grok-itv-20"],
+        "tier_prices": {"grok-itv-10": 196, "grok-itv-20": 316},
+        "required": ["prompt", "image_urls"], "optional": ["duration"]}}}}
+    v8 = Vibe("t", transport=lambda *a: (200, caps_t))
+    assert "grok-itv-10" in v8.known_models("video")
+    assert v8.tier_price("grok-itv-10") == 196 and v8.tier_price("grok-itv") == 36
+    assert v8._body("video", "grok-itv-10", "кот", {"image": "u"})["model"] == "grok-itv-10"
+
+    # 18. Отброшенные сервером поля не остаются незамеченными: деньги уже ушли.
+    def with_ignored(method, url, body, headers):
+        if url.endswith("/generate"):
+            return 200, {"status": "processing", "generation_id": 5, "cost": 36,
+                         "ignored_params": ["image_input"]}
+        return fake(method, url, body, headers)
+
+    try:
+        Vibe("t", transport=with_ignored).generate("image", "z-image", "тест")
+        raise AssertionError("списание с проигнорированными полями прошло молча")
+    except VibeError as e:
+        assert e.code == "params_ignored_after_charge", e.code
+
+    # 19. Два поля под картинку это два сценария, выбор за пользователем.
+    caps_m = {"models": {"video": {"seedance-2": {
+        "required": ["prompt"],
+        "optional": ["first_frame_url", "reference_image_urls"]}}}}
+    v9 = Vibe("t", transport=lambda *a: (200, caps_m))
+    try:
+        v9._body("video", "seedance-2", "сцена", {"image": "u"})
+        raise AssertionError("поле выбрано за пользователя молча")
+    except ValueError:
+        pass
+    assert "reference_image_urls" in v9._body(
+        "video", "seedance-2", "сцена", {"image": "u", "field": "reference_image_urls"})
+
+    print("самопроверка пройдена: 19 из 19")
 
 
 if __name__ == "__main__":
