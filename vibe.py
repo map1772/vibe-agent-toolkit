@@ -28,10 +28,18 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
 import uuid
+
+# Иначе на консоли без UTF-8 (обычный cmd, Git Bash) печать кириллицы падает
+# с UnicodeEncodeError уже ПОСЛЕ прохождения тестов, и выглядит это как провал.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 
 BASE = "https://lk.vibemarketolog.ru/api/agent"
 
@@ -98,7 +106,13 @@ class Vibe:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                return r.status, json.loads(r.read().decode("utf-8") or "{}")
+                raw = r.read().decode("utf-8", "replace")
+                try:
+                    return r.status, json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    # 200 с не-JSON телом: страница прокси или WAF вместо ответа API
+                    return 502, {"error": "bad_response",
+                                 "message": "сервер вернул не JSON", "raw": raw[:300]}
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", "replace")
             try:
@@ -114,16 +128,29 @@ class Vibe:
         if idem:
             body = dict(body or {}, idempotency_key=idem)
         delay = 1.0
+        attempts = max(1, self.max_retries)
         status, payload = 0, {}
-        for attempt in range(max(1, self.max_retries)):
-            status, payload = self._transport(method, url, body, headers)
+        for attempt in range(attempts):
+            last = attempt == attempts - 1
+            try:
+                status, payload = self._transport(method, url, body, headers)
+            except Exception as e:
+                # обрыв сети, таймаут, сброс соединения: ретрай идёт с ТЕМ ЖЕ
+                # ключом идемпотентности, поэтому повтор не оплачивается второй раз
+                if last:
+                    raise VibeError(0, {"error": "network_error",
+                                        "message": f"{type(e).__name__}: {e}"}) from e
+                time.sleep(delay)
+                delay = min(delay * 2, 30)
+                continue
             if status < 400:
                 return payload
-            if status not in RETRY_STATUS or attempt == self.max_retries - 1:
+            if status not in RETRY_STATUS or last:
                 raise VibeError(status, payload)
-            # сервер сам говорит, сколько ждать; свои догадки тут вредны
+            # сервер сам говорит, сколько ждать; свои догадки тут вредны.
+            # ноль это valid ответ «повторяй сразу», поэтому сравниваем с None
             wait = payload.get("retry_after")
-            time.sleep(float(wait) if wait else delay)
+            time.sleep(max(0.0, float(wait)) if wait is not None else delay)
             delay = min(delay * 2, 30)
         raise VibeError(status, payload)
 
@@ -160,7 +187,7 @@ class Vibe:
             caps = self.capabilities
         except VibeError:
             return set()
-        models = caps.get("models")
+        models = caps.get("models") if isinstance(caps, dict) else None
         if not isinstance(models, dict):
             return set()
         if type:
@@ -223,7 +250,16 @@ class Vibe:
 
         if self.confirm_above and not confirm:
             est = self._call("POST", "/generate/estimate", body)
-            cost = float(est.get("estimated_cost_rub") or est.get("reserve_rub") or 0)
+            raw = est.get("estimated_cost_rub", est.get("reserve_rub"))
+            if raw is None:
+                # цены нет, значит проверить порог нечем. Молча пропускать нельзя:
+                # это ровно то дорогое списание, ради которого порог и заведён
+                raise VibeError(0, {
+                    "error": "estimate_unavailable",
+                    "message": "смета не вернула цену, порог проверить нечем; "
+                               "повторите с confirm=True, если запуск всё равно нужен",
+                    "estimate": est})
+            cost = float(raw)
             if cost > self.confirm_above:
                 raise VibeError(0, {
                     "error": "confirm_required",
@@ -272,8 +308,19 @@ class Vibe:
         for i, url in enumerate(urls):
             name = f"{st.get('generation_id', 'gen')}{'' if len(urls) == 1 else f'_{i}'}"
             path = os.path.join(folder, name + _ext(url, st.get("type")))
-            with urllib.request.urlopen(url, timeout=self.timeout) as r, open(path, "wb") as f:
-                f.write(r.read())
+            try:
+                with urllib.request.urlopen(url, timeout=self.timeout) as r:
+                    blob = r.read()
+            except Exception as e:
+                # ссылка живёт 7 дней; протухшую надо отличать от успеха явно,
+                # и ошибка должна быть той же породы, что у остальных методов
+                raise VibeError(0, {"error": "download_failed", "url": url,
+                                    "message": f"{type(e).__name__}: {e}"}) from e
+            if not blob:
+                raise VibeError(0, {"error": "empty_file", "url": url,
+                                    "message": "по ссылке пришёл пустой файл"})
+            with open(path, "wb") as f:
+                f.write(blob)
             saved.append(path)
         return saved
 
@@ -310,10 +357,19 @@ def _param_names(spec):
     return {n for n in names if n}
 
 
+# Модели, которые входную картинку не принимают вовсе: это генерация из текста.
+# Без этого списка запасная таблица подсовывала им поле правки, и терялись деньги
+# ровно тем способом, против которого написан весь клиент.
+TEXT_ONLY_IMAGE = ("z-image", "seedream-5-pro", "seedream-5-lite", "gpt-image-2",
+                   "gpt-image-1.5", "grok-image")
+
+
 def _fallback_field(model, kind):
     """Поле по таблице документации, когда живого каталога нет."""
     m = model.lower()
     if kind == "image":
+        if m in TEXT_ONLY_IMAGE:            # точное совпадение: у -edit поле есть
+            return None
         if m.startswith("omnihuman"):
             return "image_url"
         if m.startswith("motion-control"):
@@ -331,9 +387,18 @@ def _fallback_field(model, kind):
 
 
 def _shape(field, value):
-    """Половина полей ждёт список, половина одну строку. Приводим по имени."""
+    """Половина полей ждёт список, половина одну строку. Приводим по имени.
+
+    Лишние значения не отбрасываем молча: клиент, который тихо теряет часть
+    входа и всё равно платит за генерацию, ничем не лучше промаха полем."""
     plural = field.endswith("s")
     if isinstance(value, (list, tuple)):
+        if not value:
+            raise ValueError(f"поле {field} получило пустой список")
+        if not plural and len(value) > 1:
+            raise ValueError(
+                f"поле {field} принимает одно значение, а передано {len(value)}. "
+                f"Уберите лишние или выберите модель, которая принимает список")
         return list(value) if plural else value[0]
     return [value] if plural else value
 
@@ -429,9 +494,10 @@ def _selftest():
     except VibeError as e:
         assert e.status == 402 and e.code == "insufficient_balance"
 
-    # 7. Списки и одиночные значения приводятся по имени поля.
+    # 7. Одиночное значение приводится к списку там, где поле его ждёт.
+    #    Обратный случай (список в поле на одно значение) проверяется в п.15.
     assert _shape("image_urls", "a") == ["a"]
-    assert _shape("image_url", ["a", "b"]) == "a"
+    assert _shape("image_url", "a") == "a"
 
     # 8. Имя модели не из каталога отбивается с подсказкой, а не уходит в 422.
     #    Это реальный случай: документация обещает grok-itv-10, каталог знает grok-itv.
@@ -449,7 +515,69 @@ def _selftest():
     assert _ext("https://x.io/ab", "video") == ".mp4", _ext("https://x.io/ab", "video")
     assert _ext("https://host/files/generation/7.mp4") == ".mp4"
 
-    print("самопроверка пройдена: 10 из 10")
+    # 11. Обрыв сети уходит в ретрай, а не наружу сырым исключением. Иначе
+    #     обещание «сетевой сбой не оплачивается дважды» ничем не обеспечено.
+    import socket
+    state = {"tries": 0}
+
+    def dropped_once(method, url, body, headers):
+        state["tries"] += 1
+        if state["tries"] == 1:
+            raise socket.timeout("сеть моргнула")
+        return fake(method, url, body, headers)
+
+    v5 = Vibe("t", transport=dropped_once)
+    v5.generate("image", "z-image", "после обрыва")
+    assert state["tries"] >= 2, "повтора после обрыва не было"
+
+    # 12. retry_after=0 значит «повторяй сразу», а не «спи секунду по умолчанию».
+    slept = []
+    real_sleep, time.sleep = time.sleep, lambda s: slept.append(s)
+    try:
+        seq0 = [(503, {"error": "rate_limit_exceeded", "retry_after": 0})]
+
+        def zero_wait(method, url, body, headers):
+            if url.endswith("/generate") and seq0:
+                return seq0.pop()
+            return fake(method, url, body, headers)
+
+        Vibe("t", transport=zero_wait).generate("image", "z-image", "мгновенный повтор")
+    finally:
+        time.sleep = real_sleep
+    assert slept and slept[0] == 0, f"retry_after=0 проигнорирован, спали {slept}"
+
+    # 13. Каталог, пришедший не словарём, не роняет клиент.
+    v6 = Vibe("t", transport=lambda m, u, b, h: (200, None) if u.endswith("/capabilities")
+              else (200, {}))
+    assert v6.known_models("image") == set()
+
+    # 14. Модель, которая картинку не принимает, не получает её и по запасной
+    #     таблице, когда каталог недоступен. seedream-5-pro это text-to-image.
+    v7 = Vibe("t", transport=lambda *a: (401, {"error": "unauthorized"}))
+    assert v7._media_field("seedream-5-pro", "image") is None
+    assert v7._media_field("seedream-5-pro-edit", "image") == "image_input"
+
+    # 15. Несколько значений не влезают в поле на одно и не теряются молча.
+    assert _shape("image_urls", "a") == ["a"]
+    try:
+        _shape("image_url", ["a", "b"])
+        raise AssertionError("лишнее значение отброшено молча")
+    except ValueError:
+        pass
+
+    # 16. Смета без цены не пропускает дорогую генерацию мимо порога.
+    def no_price(method, url, body, headers):
+        if url.endswith("/generate/estimate"):
+            return 200, {"valid": True}          # цены нет
+        return fake(method, url, body, headers)
+
+    try:
+        Vibe("t", transport=no_price, confirm_above=100).generate("image", "z-image", "дорого")
+        raise AssertionError("генерация ушла, хотя цену проверить было нечем")
+    except VibeError as e:
+        assert e.code == "estimate_unavailable", e.code
+
+    print("самопроверка пройдена: 16 из 16")
 
 
 if __name__ == "__main__":

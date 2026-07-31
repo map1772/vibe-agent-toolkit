@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -128,8 +129,30 @@ def bench_field_cost(models):
         print(f"  в среднем по восьми моделям: {avg:.2f} р за один промах\n")
 
 
+def measure_live_rtt(n=3):
+    """Реальное сетевое время до боевого хоста. Открытая тулза каталога ключа
+    не требует, значит это честно измеренное число, а не цитата."""
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": "list_capabilities", "arguments": {}}}).encode()
+    times = []
+    for _ in range(n):
+        req = urllib.request.Request("https://lk.vibemarketolog.ru/api/mcp", data=body,
+                                     method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "Accept": "application/json, text/event-stream"})
+        t0 = time.time()
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except Exception:
+            return None
+        times.append(time.time() - t0)
+    return sum(times) / len(times)
+
+
 def bench_debug_cycle():
-    """Цикл отладки: двойник против боевых таймингов из документации."""
+    """Цикл отладки. Здесь честно сложены две РАЗНЫЕ по природе величины:
+    локальное время измерено, время боевой генерации взято из документации,
+    потому что ключа нет. В выводе это помечено прямо, а не сноской внизу."""
     print("ЗАМЕР 3. Скорость цикла отладки")
     srv, base = vibe_fake.serve(port=0, balance=100000)
     try:
@@ -142,12 +165,20 @@ def bench_debug_cycle():
         local = time.time() - t0
     finally:
         srv.shutdown()
-    # из документации: image 30-90 секунд, берём нижнюю границу, чтобы не завышать
+
+    rtt = measure_live_rtt()
+    print(f"  [измерено]  {n} итераций на двойнике: {local:.1f} с")
+    if rtt is not None:
+        print(f"  [измерено]  круговое время до боевого хоста: {rtt * 1000:.0f} мс на запрос, "
+              f"то есть одна только сеть добавит ~{rtt * n:.1f} с на {n} итераций")
+    else:
+        print("  [нет связи] боевой хост не ответил, сетевую часть пропускаю")
     real = n * 30
-    print(f"  {n} итераций на двойнике: {local:.1f} с")
-    print(f"  те же {n} итераций на боевом API: минимум {real} с по вашим же срокам "
-          f"(image 30-90 с)")
-    print(f"  разница: в {real / local:.0f} раз быстрее и за 0 рублей вместо реальных списаний\n")
+    print(f"  [из документации, НЕ измерено] генерация image идёт 30-90 с, "
+          f"значит {n} итераций это минимум {real} с")
+    print(f"  разница примерно в {real / local:.0f} раз и за 0 рублей вместо списаний.")
+    print("  оговорка: боевую сторону я не прогонял, нижняя граница взята из вашей "
+          "документации\n")
 
 
 if __name__ == "__main__":

@@ -81,6 +81,22 @@ def main():
         for t, n in extra_total:
             print(f"  {t:<7} {n}")
 
+    # Ключ строгой проверки описан в прозе, но агент читает не прозу, а схему.
+    total = sum(len(node) for node in live.values() if isinstance(node, dict))
+    declared = sum(1 for node in live.values() if isinstance(node, dict)
+                   for spec in node.values()
+                   if "strict" in set(spec.get("required", [])) | set(spec.get("optional", [])))
+    print(f"\nSTRICT В СХЕМЕ: объявлен у {declared} моделей из {total}")
+    if declared == 0:
+        print("  документация описывает strict отдельным разделом с примером,")
+        print("  но ни одна модель не объявляет его в required/optional.")
+        print("  Агент, который строит запрос по схеме, о защите не узнает.")
+
+    partner = caps.get("partner_only")
+    if partner:
+        print("\nПЛАТНОЕ ВНЕ ОТКРЫТОГО API (поле partner_only каталога):")
+        print(" ", str(partner)[:300])
+
     # проверка, что клиент правильно читает схему живого каталога
     v = Vibe("catalog-only", transport=lambda *a: (200, caps))
     v._caps = caps

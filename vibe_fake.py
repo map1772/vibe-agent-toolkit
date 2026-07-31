@@ -1,4 +1,4 @@
-"""Локальный двойник Agent API: отладка агента без списаний.
+﻿"""Локальный двойник Agent API: отладка агента без списаний.
 
 Зачем. У платформы нет песочницы и нет отмены задачи. Значит любая отладка
 интеграции идёт за живые деньги: перепутал поле — заплатил, промахнулся
@@ -27,10 +27,16 @@ import hashlib
 import hmac
 import json
 import re
+import sys
 import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+try:                                    # см. тот же комментарий в vibe.py
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 
 SECRET = "fake-webhook-secret"
 
@@ -365,13 +371,34 @@ def _selftest():
             assert e.code == "model_not_in_catalog", e.payload
             assert "z-image" in e.payload["message"], e.payload["message"]
 
+        # 5г. Двадцать ОДНОВРЕМЕННЫХ запросов с одним ключом идемпотентности
+        #     дают одно списание. Последовательная проверка выше этого не ловит:
+        #     гонка живёт между освобождением лока и записью ключа.
+        before = v.balance()["balance"]
+        same = {"type": "image", "model": "z-image", "prompt": "гонка", "strict": True}
+        got = []
+
+        def hit():
+            try:
+                got.append(v._call("POST", "/generate", dict(same), idem="one-key"))
+            except Exception as e:
+                got.append({"err": type(e).__name__})
+
+        threads = [threading.Thread(target=hit) for _ in range(20)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        ids = {g.get("generation_id") for g in got if isinstance(g, dict)}
+        spent = before - v.balance()["balance"]
+        assert len(ids) == 1, f"20 параллельных запросов дали {len(ids)} генераций"
+        assert abs(spent - BY_NAME["z-image"]["price"]) < 0.01, f"списано {spent} вместо одной цены"
+
         # 6. Подпись вебхука сходится только на неизменённом теле.
         raw = b'{"event":"generation.complete","generation_id":1}'
         sig = hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
         assert verify(raw, sig)
         assert not verify(raw + b" ", sig)
 
-        print("самопроверка двойника пройдена: 6 из 6")
+        print("самопроверка двойника пройдена: 7 из 7")
     finally:
         srv.shutdown()
 
