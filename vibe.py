@@ -28,9 +28,11 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -42,6 +44,27 @@ except (AttributeError, ValueError):
     pass
 
 BASE = "https://lk.vibemarketolog.ru/api/agent"
+
+# Потолок на тело ответа: раздутый ответ от API или от ссылки на результат не
+# должен съесть память процесса. 64 МБ с запасом на любое видео этого API.
+_MAX_RESPONSE = 64 * 1024 * 1024
+
+
+class _NoAuthLeakRedirect(urllib.request.HTTPRedirectHandler):
+    """Снимает Authorization, если редирект уводит на другой хост.
+
+    Голый urllib тащит заголовок Authorization сквозь любой редирект, и токен
+    ушёл бы на чужой домен, подставленный ответом Location.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None:
+            same = urllib.parse.urlsplit(req.full_url).netloc
+            if urllib.parse.urlsplit(newurl).netloc != same:
+                new.headers = {k: v for k, v in new.headers.items()
+                               if k.lower() != "authorization"}
+        return new
 
 # Куда каждая модель ждёт входную картинку/видео/аудио. Таблица нужна как
 # фолбэк: живой /capabilities точнее, но он есть не всегда (офлайн, старый ключ).
@@ -105,8 +128,15 @@ class Vibe:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                raw = r.read().decode("utf-8", "replace")
+            # свой opener без стандартного редирект-хендлера: urllib не снимает
+            # заголовок Authorization при переходе на чужой хост, и токен утёк бы
+            # редиректом на левый домен
+            opener = urllib.request.build_opener(_NoAuthLeakRedirect())
+            with opener.open(req, timeout=self.timeout) as r:
+                raw = r.read(_MAX_RESPONSE + 1).decode("utf-8", "replace")
+                if len(raw) > _MAX_RESPONSE:
+                    return 502, {"error": "too_large",
+                                 "message": f"ответ больше {_MAX_RESPONSE} байт"}
                 try:
                     return r.status, json.loads(raw or "{}")
                 except json.JSONDecodeError:
@@ -346,18 +376,33 @@ class Vibe:
         if not urls:
             raise VibeError(0, {"error": "no_result", "message": "в ответе нет ссылок на файл"})
         os.makedirs(folder, exist_ok=True)
+        folder = os.path.abspath(folder)
         saved = []
         for i, url in enumerate(urls):
-            name = f"{st.get('generation_id', 'gen')}{'' if len(urls) == 1 else f'_{i}'}"
-            path = os.path.join(folder, name + _ext(url, st.get("type")))
+            if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+                # url приходит из ответа сервера: file:// или data: увели бы чтение
+                # с диска процесса вместо скачивания результата
+                raise VibeError(0, {"error": "bad_url", "url": url,
+                                    "message": "ссылка на результат не http(s)"})
+            # generation_id идёт из ответа сервера и попадает в имя файла: без
+            # очистки '../..' в нём вывел бы запись за пределы папки
+            raw_id = str(st.get("generation_id", "gen"))
+            safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", raw_id) or "gen"
+            name = f"{safe_id}{'' if len(urls) == 1 else f'_{i}'}" + _ext(url, st.get("type"))
+            path = os.path.join(folder, name)
+            if os.path.commonpath([folder, os.path.abspath(path)]) != folder:
+                raise VibeError(0, {"error": "bad_path", "message": "имя файла выводит за папку"})
             try:
                 with urllib.request.urlopen(url, timeout=self.timeout) as r:
-                    blob = r.read()
+                    blob = r.read(_MAX_RESPONSE + 1)
             except Exception as e:
                 # ссылка живёт 7 дней; протухшую надо отличать от успеха явно,
                 # и ошибка должна быть той же породы, что у остальных методов
                 raise VibeError(0, {"error": "download_failed", "url": url,
                                     "message": f"{type(e).__name__}: {e}"}) from e
+            if len(blob) > _MAX_RESPONSE:
+                raise VibeError(0, {"error": "too_large", "url": url,
+                                    "message": f"файл больше {_MAX_RESPONSE} байт"})
             if not blob:
                 raise VibeError(0, {"error": "empty_file", "url": url,
                                     "message": "по ссылке пришёл пустой файл"})

@@ -12,7 +12,10 @@ import json, os, sys, time, urllib.error, urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-SECRETS = r"C:\Users\Administrator\.secrets\vibemarketolog.json"
+# путь к учётке из окружения, чтобы имя пользователя машины не торчало в
+# публичном репозитории; дефолт для нашей машины оставлен как запасной
+SECRETS = os.environ.get("VIBE_SECRETS",
+                         os.path.expanduser(r"~\.secrets\vibemarketolog.json"))
 MODEL = "grok-itv"
 RIGHT_FIELD = "image_urls"
 WRONG_FIELD = "image_url"
